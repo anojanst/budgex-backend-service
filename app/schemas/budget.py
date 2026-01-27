@@ -4,8 +4,9 @@ Pydantic schemas for Budget API
 
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer, field_validator
 
 
 class BudgetBase(BaseModel):
@@ -37,6 +38,21 @@ class BudgetResponse(BudgetBase):
     user_id: str
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("user_id", mode="before")
+    @classmethod
+    def convert_user_id(cls, value: UUID | str) -> str:
+        """Convert UUID to string if needed"""
+        if isinstance(value, UUID):
+            return str(value)
+        return value
+
+    @field_serializer("user_id")
+    def serialize_user_id(self, value: UUID | str, _info) -> str:
+        """Convert UUID to string if needed during serialization"""
+        if isinstance(value, UUID):
+            return str(value)
+        return value
 
     class Config:
         from_attributes = True
