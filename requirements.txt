@@ -1,0 +1,40 @@
+# FastAPI and ASGI Server
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+
+# Database
+sqlalchemy==2.0.36
+alembic==1.14.0
+asyncpg==0.30.0  # Async PostgreSQL driver
+psycopg2-binary==2.9.10  # Fallback PostgreSQL driver
+greenlet==3.1.1  # Required for SQLAlchemy async operations
+
+# Authentication & Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4  # For future password hashing if needed
+
+# Data Validation
+pydantic==2.9.2
+pydantic-settings==2.5.2
+
+# Environment Variables
+python-dotenv==1.0.1
+
+# Email
+fastapi-mail==1.4.1
+# Note: aiosmtplib is included as a dependency of fastapi-mail (version <3.0)
+
+# Caching (Optional - for OTP storage)
+redis==5.2.0
+hiredis==2.3.2  # Faster Redis parser
+
+# Testing
+pytest==8.3.3
+pytest-asyncio==0.24.0
+httpx==0.27.2  # For testing FastAPI endpoints
+aiosqlite==0.20.0  # For in-memory SQLite testing
+
+# Utilities
+python-multipart==0.0.12  # For file uploads (if needed)
+email-validator==2.2.0  # Email validation
+
