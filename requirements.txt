@@ -21,8 +21,7 @@ pydantic-settings==2.5.2
 python-dotenv==1.0.1
 
 # Email
-fastapi-mail==1.4.1
-# Note: aiosmtplib is included as a dependency of fastapi-mail (version <3.0)
+resend==2.1.0  # Resend email API (modern, reliable alternative to SMTP)
 
 # Caching (Optional - for OTP storage)
 redis==5.2.0

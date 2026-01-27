@@ -33,15 +33,12 @@ ACCESS_TOKEN_EXPIRE_DAYS=30
 OTP_EXPIRE_MINUTES=10
 OTP_LENGTH=6
 
-# Email Configuration (SMTP)
-# IMPORTANT: For Gmail, you MUST use an App Password (not regular password)
-# See EMAIL_TROUBLESHOOTING.md for setup instructions
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587  # Try 465 if 587 times out
-SMTP_USER=ethanojan1@gmail.com
-SMTP_PASSWORD=your-app-password  # MUST be Gmail App Password (16 chars)
-SMTP_FROM_EMAIL=ethanojan1@gmail.com
-SMTP_TLS=true
+# Email Configuration (Resend API - Recommended)
+# Quick setup: See RESEND_SETUP.md for step-by-step instructions
+# 1. Sign up at https://resend.com (free tier: 3,000 emails/month)
+# 2. Get API key from https://resend.com/api-keys
+RESEND_API_KEY=re_your_api_key_here
+RESEND_FROM_EMAIL=onboarding@resend.dev  # Default for testing, update after verifying your domain
 
 # API Configuration
 API_V1_PREFIX=/api/v1
@@ -130,12 +127,15 @@ railway run alembic upgrade head
 - Run migrations via Railway Shell
 
 ### Email Sending Issues
-- **"Timed out connecting to smtp.gmail.com"**: See [EMAIL_TROUBLESHOOTING.md](./EMAIL_TROUBLESHOOTING.md)
-- **Common fixes**:
-  - Use Gmail App Password (not regular password) - **REQUIRED**
-  - Try port 465 instead of 587
-  - Consider using SendGrid/Mailgun for production
-- Check Railway logs for detailed error messages
+- **Using Resend (Recommended)**: See [RESEND_SETUP.md](./RESEND_SETUP.md) for setup
+  - Free tier: 3,000 emails/month
+  - Works reliably in Railway
+  - No SMTP/port issues
+  - Quick setup: Get API key from https://resend.com/api-keys
+- **If using Gmail SMTP** (not recommended):
+  - See [GMAIL_SETUP.md](./GMAIL_SETUP.md) for setup
+  - Common issue: Timeouts due to Railway IP blocking
+  - Solution: Switch to Resend (see [RESEND_SETUP.md](./RESEND_SETUP.md))
 
 ---
 

@@ -24,13 +24,9 @@ class Settings(BaseSettings):
     OTP_LENGTH: int = 6
     OTP_MAX_ATTEMPTS: int = 3
 
-    # Email (SMTP)
-    SMTP_HOST: str
-    SMTP_PORT: int = 587
-    SMTP_USER: str
-    SMTP_PASSWORD: str
-    SMTP_FROM_EMAIL: str
-    SMTP_TLS: bool = True
+    # Email (Resend API)
+    RESEND_API_KEY: str
+    RESEND_FROM_EMAIL: str = "onboarding@resend.dev"  # Default Resend domain, update after verifying your domain
 
     # Redis (Optional)
     REDIS_URL: str = "redis://localhost:6379/0"
