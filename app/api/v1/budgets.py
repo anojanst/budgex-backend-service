@@ -2,18 +2,19 @@
 Budget API endpoints
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
 from typing import List, Optional
 from uuid import UUID
 
-from app.database import get_db
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.deps import get_current_active_user
-from app.models.user import User
+from app.database import get_db
 from app.models.budget import Budget
 from app.models.expense import Expense
-from app.schemas.budget import BudgetCreate, BudgetUpdate, BudgetResponse, BudgetSummary
+from app.models.user import User
+from app.schemas.budget import BudgetCreate, BudgetResponse, BudgetSummary, BudgetUpdate
 
 router = APIRouter()
 
@@ -27,11 +28,9 @@ async def list_budgets(
     List all budgets for the current user with summary statistics
     """
     # Get all budgets for user
-    result = await db.execute(
-        select(Budget).where(Budget.user_id == current_user.id).order_by(Budget.created_at.desc())
-    )
+    result = await db.execute(select(Budget).where(Budget.user_id == current_user.id).order_by(Budget.created_at.desc()))
     budgets = result.scalars().all()
-    
+
     # Calculate summary for each budget
     budgets_with_summary = []
     for budget in budgets:
@@ -39,22 +38,24 @@ async def list_budgets(
         expense_result = await db.execute(
             select(
                 func.coalesce(func.sum(Expense.amount), 0).label("total_spent"),
-                func.count(Expense.id).label("expenses_count")
+                func.count(Expense.id).label("expenses_count"),
             ).where(Expense.budget_id == budget.id)
         )
         expense_stats = expense_result.first()
-        
+
         total_spent = int(expense_stats.total_spent) if expense_stats.total_spent else 0
         expenses_count = expense_stats.expenses_count or 0
         remaining = budget.amount - total_spent
-        
-        budgets_with_summary.append({
-            **budget.__dict__,
-            "total_spent": total_spent,
-            "remaining": remaining,
-            "expenses_count": expenses_count,
-        })
-    
+
+        budgets_with_summary.append(
+            {
+                **budget.__dict__,
+                "total_spent": total_spent,
+                "remaining": remaining,
+                "expenses_count": expenses_count,
+            }
+        )
+
     return budgets_with_summary
 
 
@@ -67,33 +68,25 @@ async def get_budget(
     """
     Get budget details with summary statistics
     """
-    result = await db.execute(
-        select(Budget).where(
-            Budget.id == budget_id,
-            Budget.user_id == current_user.id
-        )
-    )
+    result = await db.execute(select(Budget).where(Budget.id == budget_id, Budget.user_id == current_user.id))
     budget = result.scalar_one_or_none()
-    
+
     if not budget:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Budget not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found")
+
     # Calculate summary statistics
     expense_result = await db.execute(
         select(
             func.coalesce(func.sum(Expense.amount), 0).label("total_spent"),
-            func.count(Expense.id).label("expenses_count")
+            func.count(Expense.id).label("expenses_count"),
         ).where(Expense.budget_id == budget.id)
     )
     expense_stats = expense_result.first()
-    
+
     total_spent = int(expense_stats.total_spent) if expense_stats.total_spent else 0
     expenses_count = expense_stats.expenses_count or 0
     remaining = budget.amount - total_spent
-    
+
     return {
         **budget.__dict__,
         "total_spent": total_spent,
@@ -117,11 +110,11 @@ async def create_budget(
         amount=budget_data.amount,
         icon=budget_data.icon,
     )
-    
+
     db.add(new_budget)
     await db.commit()
     await db.refresh(new_budget)
-    
+
     return new_budget
 
 
@@ -135,20 +128,12 @@ async def update_budget(
     """
     Update a budget
     """
-    result = await db.execute(
-        select(Budget).where(
-            Budget.id == budget_id,
-            Budget.user_id == current_user.id
-        )
-    )
+    result = await db.execute(select(Budget).where(Budget.id == budget_id, Budget.user_id == current_user.id))
     budget = result.scalar_one_or_none()
-    
+
     if not budget:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Budget not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found")
+
     # Update fields
     if budget_data.name is not None:
         budget.name = budget_data.name
@@ -156,10 +141,10 @@ async def update_budget(
         budget.amount = budget_data.amount
     if budget_data.icon is not None:
         budget.icon = budget_data.icon
-    
+
     await db.commit()
     await db.refresh(budget)
-    
+
     return budget
 
 
@@ -172,22 +157,13 @@ async def delete_budget(
     """
     Delete a budget (cascades to expenses)
     """
-    result = await db.execute(
-        select(Budget).where(
-            Budget.id == budget_id,
-            Budget.user_id == current_user.id
-        )
-    )
+    result = await db.execute(select(Budget).where(Budget.id == budget_id, Budget.user_id == current_user.id))
     budget = result.scalar_one_or_none()
-    
+
     if not budget:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Budget not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found")
+
     await db.delete(budget)
     await db.commit()
-    
-    return None
 
+    return None

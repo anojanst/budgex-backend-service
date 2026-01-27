@@ -2,8 +2,9 @@
 Application configuration settings
 """
 
-from pydantic_settings import BaseSettings
 from typing import List
+
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -38,7 +39,7 @@ class Settings(BaseSettings):
     # API
     API_V1_PREFIX: str = "/api/v1"
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8080"  # Comma-separated string
-    
+
     @property
     def cors_origins_list(self) -> List[str]:
         """Parse CORS_ORIGINS string into list"""
@@ -57,4 +58,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-

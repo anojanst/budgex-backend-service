@@ -2,19 +2,25 @@
 Loan API endpoints
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from datetime import date as date_type
+from datetime import datetime, timedelta
 from typing import List
-from datetime import date as date_type, datetime, timedelta
 
-from app.database import get_db
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.deps import get_current_active_user
-from app.models.user import User
+from app.database import get_db
 from app.models.loan import Loan, LoanRepayment
+from app.models.user import User
 from app.schemas.loan import (
-    LoanCreate, LoanUpdate, LoanResponse, LoanWithRepayments,
-    LoanRepaymentResponse, LoanRepaymentCreate
+    LoanCreate,
+    LoanRepaymentCreate,
+    LoanRepaymentResponse,
+    LoanResponse,
+    LoanUpdate,
+    LoanWithRepayments,
 )
 
 router = APIRouter()
@@ -28,9 +34,7 @@ async def list_loans(
     """
     List all loans for the current user
     """
-    result = await db.execute(
-        select(Loan).where(Loan.user_id == current_user.id).order_by(Loan.created_at.desc())
-    )
+    result = await db.execute(select(Loan).where(Loan.user_id == current_user.id).order_by(Loan.created_at.desc()))
     loans = result.scalars().all()
     return loans
 
@@ -44,34 +48,24 @@ async def get_loan(
     """
     Get loan details with repayment schedule
     """
-    result = await db.execute(
-        select(Loan).where(
-            Loan.id == loan_id,
-            Loan.user_id == current_user.id
-        )
-    )
+    result = await db.execute(select(Loan).where(Loan.id == loan_id, Loan.user_id == current_user.id))
     loan = result.scalar_one_or_none()
-    
+
     if not loan:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Loan not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan not found")
+
     # Get repayments
     repayments_result = await db.execute(
-        select(LoanRepayment).where(LoanRepayment.loan_id == loan_id)
-        .order_by(LoanRepayment.payment_date.desc())
+        select(LoanRepayment).where(LoanRepayment.loan_id == loan_id).order_by(LoanRepayment.payment_date.desc())
     )
     repayments = repayments_result.scalars().all()
-    
+
     # Calculate totals
     total_paid_result = await db.execute(
-        select(func.coalesce(func.sum(LoanRepayment.amount), 0))
-        .where(LoanRepayment.loan_id == loan_id)
+        select(func.coalesce(func.sum(LoanRepayment.amount), 0)).where(LoanRepayment.loan_id == loan_id)
     )
     total_paid = int(total_paid_result.scalar_one() or 0)
-    
+
     return {
         **loan.__dict__,
         "repayments": repayments,
@@ -100,11 +94,11 @@ async def create_loan(
         next_due_date=loan_data.next_due_date,
         is_paid_off=loan_data.is_paid_off,
     )
-    
+
     db.add(new_loan)
     await db.commit()
     await db.refresh(new_loan)
-    
+
     return new_loan
 
 
@@ -118,20 +112,12 @@ async def update_loan(
     """
     Update a loan
     """
-    result = await db.execute(
-        select(Loan).where(
-            Loan.id == loan_id,
-            Loan.user_id == current_user.id
-        )
-    )
+    result = await db.execute(select(Loan).where(Loan.id == loan_id, Loan.user_id == current_user.id))
     loan = result.scalar_one_or_none()
-    
+
     if not loan:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Loan not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan not found")
+
     # Update fields
     if loan_data.lender is not None:
         loan.lender = loan_data.lender
@@ -151,10 +137,10 @@ async def update_loan(
         loan.next_due_date = loan_data.next_due_date
     if loan_data.is_paid_off is not None:
         loan.is_paid_off = loan_data.is_paid_off
-    
+
     await db.commit()
     await db.refresh(loan)
-    
+
     return loan
 
 
@@ -167,27 +153,23 @@ async def delete_loan(
     """
     Delete a loan (cascades to repayments)
     """
-    result = await db.execute(
-        select(Loan).where(
-            Loan.id == loan_id,
-            Loan.user_id == current_user.id
-        )
-    )
+    result = await db.execute(select(Loan).where(Loan.id == loan_id, Loan.user_id == current_user.id))
     loan = result.scalar_one_or_none()
-    
+
     if not loan:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Loan not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan not found")
+
     await db.delete(loan)
     await db.commit()
-    
+
     return None
 
 
-@router.post("/{loan_id}/repayments/", response_model=LoanRepaymentResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{loan_id}/repayments/",
+    response_model=LoanRepaymentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_repayment(
     loan_id: int,
     repayment_data: LoanRepaymentCreate,
@@ -198,35 +180,25 @@ async def create_repayment(
     Create a loan repayment record
     """
     # Verify loan belongs to user
-    loan_result = await db.execute(
-        select(Loan).where(
-            Loan.id == loan_id,
-            Loan.user_id == current_user.id
-        )
-    )
+    loan_result = await db.execute(select(Loan).where(Loan.id == loan_id, Loan.user_id == current_user.id))
     loan = loan_result.scalar_one_or_none()
-    
+
     if not loan:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Loan not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan not found")
+
     # Validate expense_id if provided
     if repayment_data.expense_id:
         from app.models.expense import Expense
+
         expense_result = await db.execute(
             select(Expense).where(
                 Expense.id == repayment_data.expense_id,
-                Expense.user_id == current_user.id
+                Expense.user_id == current_user.id,
             )
         )
         if not expense_result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Expense not found"
-            )
-    
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Expense not found")
+
     new_repayment = LoanRepayment(
         loan_id=loan_id,
         user_id=current_user.id,
@@ -237,18 +209,18 @@ async def create_repayment(
         status=repayment_data.status,
         expense_id=repayment_data.expense_id,
     )
-    
+
     db.add(new_repayment)
-    
+
     # Update loan remaining principal if payment is made
     if repayment_data.status == "paid":
         loan.remaining_principal = max(0, loan.remaining_principal - repayment_data.principal_amount)
         if loan.remaining_principal == 0:
             loan.is_paid_off = True
-    
+
     await db.commit()
     await db.refresh(new_repayment)
-    
+
     return new_repayment
 
 
@@ -262,23 +234,13 @@ async def get_repayments(
     Get repayment schedule for a loan
     """
     # Verify loan belongs to user
-    loan_result = await db.execute(
-        select(Loan).where(
-            Loan.id == loan_id,
-            Loan.user_id == current_user.id
-        )
-    )
+    loan_result = await db.execute(select(Loan).where(Loan.id == loan_id, Loan.user_id == current_user.id))
     if not loan_result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Loan not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan not found")
+
     result = await db.execute(
-        select(LoanRepayment).where(LoanRepayment.loan_id == loan_id)
-        .order_by(LoanRepayment.scheduled_date.desc())
+        select(LoanRepayment).where(LoanRepayment.loan_id == loan_id).order_by(LoanRepayment.scheduled_date.desc())
     )
     repayments = result.scalars().all()
-    
-    return repayments
 
+    return repayments

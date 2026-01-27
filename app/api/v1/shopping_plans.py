@@ -2,20 +2,27 @@
 Shopping Plan API endpoints
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from typing import List, Optional
 from datetime import date as date_type
 from decimal import Decimal
+from typing import List, Optional
 
-from app.database import get_db
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.deps import get_current_active_user
+from app.database import get_db
+from app.models.shopping_plan import ShoppingItem, ShoppingPlan, ShoppingPlanStatus
 from app.models.user import User
-from app.models.shopping_plan import ShoppingPlan, ShoppingItem, ShoppingPlanStatus
 from app.schemas.shopping_plan import (
-    ShoppingPlanCreate, ShoppingPlanUpdate, ShoppingPlanResponse, ShoppingPlanWithItems,
-    ShoppingItemCreate, ShoppingItemUpdate, ShoppingItemResponse, StatusUpdate
+    ShoppingItemCreate,
+    ShoppingItemResponse,
+    ShoppingItemUpdate,
+    ShoppingPlanCreate,
+    ShoppingPlanResponse,
+    ShoppingPlanUpdate,
+    ShoppingPlanWithItems,
+    StatusUpdate,
 )
 
 router = APIRouter()
@@ -33,19 +40,19 @@ async def list_shopping_plans(
     List shopping plans with optional filters
     """
     query = select(ShoppingPlan).where(ShoppingPlan.user_id == current_user.id)
-    
+
     if status_filter:
         query = query.where(ShoppingPlan.status == status_filter)
-    
+
     if start_date:
         query = query.where(ShoppingPlan.plan_date >= start_date)
-    
+
     if end_date:
         query = query.where(ShoppingPlan.plan_date <= end_date)
-    
+
     result = await db.execute(query.order_by(ShoppingPlan.plan_date.desc()))
     plans = result.scalars().all()
-    
+
     return plans
 
 
@@ -58,34 +65,22 @@ async def get_shopping_plan(
     """
     Get shopping plan with items
     """
-    result = await db.execute(
-        select(ShoppingPlan).where(
-            ShoppingPlan.id == plan_id,
-            ShoppingPlan.user_id == current_user.id
-        )
-    )
+    result = await db.execute(select(ShoppingPlan).where(ShoppingPlan.id == plan_id, ShoppingPlan.user_id == current_user.id))
     plan = result.scalar_one_or_none()
-    
+
     if not plan:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Shopping plan not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shopping plan not found")
+
     # Get items
     items_result = await db.execute(
-        select(ShoppingItem).where(ShoppingItem.plan_id == plan_id)
-        .order_by(ShoppingItem.created_at.desc())
+        select(ShoppingItem).where(ShoppingItem.plan_id == plan_id).order_by(ShoppingItem.created_at.desc())
     )
     items = items_result.scalars().all()
-    
+
     # Calculate totals
     total_estimated = sum(item.estimate_price for item in items)
-    total_actual = sum(
-        Decimal(str(item.actual_price)) if item.actual_price else Decimal(0)
-        for item in items
-    )
-    
+    total_actual = sum(Decimal(str(item.actual_price)) if item.actual_price else Decimal(0) for item in items)
+
     return {
         **plan.__dict__,
         "items": items,
@@ -108,11 +103,11 @@ async def create_shopping_plan(
         plan_date=plan_data.plan_date,
         status=plan_data.status,
     )
-    
+
     db.add(new_plan)
     await db.commit()
     await db.refresh(new_plan)
-    
+
     return new_plan
 
 
@@ -126,28 +121,20 @@ async def update_shopping_plan(
     """
     Update a shopping plan
     """
-    result = await db.execute(
-        select(ShoppingPlan).where(
-            ShoppingPlan.id == plan_id,
-            ShoppingPlan.user_id == current_user.id
-        )
-    )
+    result = await db.execute(select(ShoppingPlan).where(ShoppingPlan.id == plan_id, ShoppingPlan.user_id == current_user.id))
     plan = result.scalar_one_or_none()
-    
+
     if not plan:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Shopping plan not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shopping plan not found")
+
     if plan_data.plan_date is not None:
         plan.plan_date = plan_data.plan_date
     if plan_data.status is not None:
         plan.status = plan_data.status
-    
+
     await db.commit()
     await db.refresh(plan)
-    
+
     return plan
 
 
@@ -160,27 +147,23 @@ async def delete_shopping_plan(
     """
     Delete a shopping plan (cascades to items)
     """
-    result = await db.execute(
-        select(ShoppingPlan).where(
-            ShoppingPlan.id == plan_id,
-            ShoppingPlan.user_id == current_user.id
-        )
-    )
+    result = await db.execute(select(ShoppingPlan).where(ShoppingPlan.id == plan_id, ShoppingPlan.user_id == current_user.id))
     plan = result.scalar_one_or_none()
-    
+
     if not plan:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Shopping plan not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shopping plan not found")
+
     await db.delete(plan)
     await db.commit()
-    
+
     return None
 
 
-@router.post("/{plan_id}/items/", response_model=ShoppingItemResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{plan_id}/items/",
+    response_model=ShoppingItemResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def add_shopping_item(
     plan_id: int,
     item_data: ShoppingItemCreate,
@@ -192,17 +175,11 @@ async def add_shopping_item(
     """
     # Verify plan belongs to user
     plan_result = await db.execute(
-        select(ShoppingPlan).where(
-            ShoppingPlan.id == plan_id,
-            ShoppingPlan.user_id == current_user.id
-        )
+        select(ShoppingPlan).where(ShoppingPlan.id == plan_id, ShoppingPlan.user_id == current_user.id)
     )
     if not plan_result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Shopping plan not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shopping plan not found")
+
     new_item = ShoppingItem(
         plan_id=plan_id,
         name=item_data.name,
@@ -211,11 +188,11 @@ async def add_shopping_item(
         need_want=item_data.need_want,
         estimate_price=item_data.estimate_price,
     )
-    
+
     db.add(new_item)
     await db.commit()
     await db.refresh(new_item)
-    
+
     return new_item
 
 
@@ -230,19 +207,13 @@ async def update_shopping_item(
     Update a shopping item
     """
     result = await db.execute(
-        select(ShoppingItem).join(ShoppingPlan).where(
-            ShoppingItem.id == item_id,
-            ShoppingPlan.user_id == current_user.id
-        )
+        select(ShoppingItem).join(ShoppingPlan).where(ShoppingItem.id == item_id, ShoppingPlan.user_id == current_user.id)
     )
     item = result.scalar_one_or_none()
-    
+
     if not item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Shopping item not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shopping item not found")
+
     # Update fields
     if item_data.name is not None:
         item.name = item_data.name
@@ -262,10 +233,10 @@ async def update_shopping_item(
         item.is_moved_to_next = item_data.is_moved_to_next
     if item_data.is_out_of_plan is not None:
         item.is_out_of_plan = item_data.is_out_of_plan
-    
+
     await db.commit()
     await db.refresh(item)
-    
+
     return item
 
 
@@ -279,22 +250,16 @@ async def delete_shopping_item(
     Delete a shopping item
     """
     result = await db.execute(
-        select(ShoppingItem).join(ShoppingPlan).where(
-            ShoppingItem.id == item_id,
-            ShoppingPlan.user_id == current_user.id
-        )
+        select(ShoppingItem).join(ShoppingPlan).where(ShoppingItem.id == item_id, ShoppingPlan.user_id == current_user.id)
     )
     item = result.scalar_one_or_none()
-    
+
     if not item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Shopping item not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shopping item not found")
+
     await db.delete(item)
     await db.commit()
-    
+
     return None
 
 
@@ -308,23 +273,14 @@ async def update_plan_status(
     """
     Update shopping plan status
     """
-    result = await db.execute(
-        select(ShoppingPlan).where(
-            ShoppingPlan.id == plan_id,
-            ShoppingPlan.user_id == current_user.id
-        )
-    )
+    result = await db.execute(select(ShoppingPlan).where(ShoppingPlan.id == plan_id, ShoppingPlan.user_id == current_user.id))
     plan = result.scalar_one_or_none()
-    
+
     if not plan:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Shopping plan not found"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shopping plan not found")
+
     plan.status = status_data.status
     await db.commit()
     await db.refresh(plan)
-    
-    return plan
 
+    return plan

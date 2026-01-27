@@ -34,10 +34,12 @@ OTP_EXPIRE_MINUTES=10
 OTP_LENGTH=6
 
 # Email Configuration (SMTP)
+# IMPORTANT: For Gmail, you MUST use an App Password (not regular password)
+# See EMAIL_TROUBLESHOOTING.md for setup instructions
 SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
+SMTP_PORT=587  # Try 465 if 587 times out
 SMTP_USER=ethanojan1@gmail.com
-SMTP_PASSWORD=your-app-password
+SMTP_PASSWORD=your-app-password  # MUST be Gmail App Password (16 chars)
 SMTP_FROM_EMAIL=ethanojan1@gmail.com
 SMTP_TLS=true
 
@@ -126,6 +128,14 @@ railway run alembic upgrade head
 - Ensure `DATABASE_URL` is set correctly
 - Check Neon database is accessible
 - Run migrations via Railway Shell
+
+### Email Sending Issues
+- **"Timed out connecting to smtp.gmail.com"**: See [EMAIL_TROUBLESHOOTING.md](./EMAIL_TROUBLESHOOTING.md)
+- **Common fixes**:
+  - Use Gmail App Password (not regular password) - **REQUIRED**
+  - Try port 465 instead of 587
+  - Consider using SendGrid/Mailgun for production
+- Check Railway logs for detailed error messages
 
 ---
 

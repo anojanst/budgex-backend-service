@@ -1,4 +1,3 @@
 """
 MCP tool implementations
 """
-

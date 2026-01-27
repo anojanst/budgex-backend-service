@@ -2,9 +2,10 @@
 Database connection and session management
 """
 
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy.orm import declarative_base
 from typing import Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import declarative_base
 
 from app.core.config import settings
 
@@ -32,41 +33,44 @@ def get_engine():
                 f"Expected format: postgresql+asyncpg://user:password@host:port/database "
                 f"Got: {settings.DATABASE_URL}"
             )
-        
+
         # Handle SSL parameters: asyncpg doesn't support 'sslmode' or 'channel_binding' in URL
         # Remove these from query params and handle via connect_args if needed
-        from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+        from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+
         parsed = urlparse(database_url)
         query_params = parse_qs(parsed.query)
-        
+
         # Extract and remove sslmode if present
         connect_args = {}
-        if 'sslmode' in query_params:
-            sslmode = query_params['sslmode'][0].lower()
-            del query_params['sslmode']
-            
+        if "sslmode" in query_params:
+            sslmode = query_params["sslmode"][0].lower()
+            del query_params["sslmode"]
+
             # Convert sslmode to asyncpg's ssl parameter
-            if sslmode in ['require', 'prefer', 'allow', 'verify-ca', 'verify-full']:
+            if sslmode in ["require", "prefer", "allow", "verify-ca", "verify-full"]:
                 # asyncpg expects ssl=True for SSL connections
-                connect_args['ssl'] = True
-            elif sslmode == 'disable':
-                connect_args['ssl'] = False
-        
+                connect_args["ssl"] = True
+            elif sslmode == "disable":
+                connect_args["ssl"] = False
+
         # Remove channel_binding if present (asyncpg doesn't support it)
-        if 'channel_binding' in query_params:
-            del query_params['channel_binding']
-        
+        if "channel_binding" in query_params:
+            del query_params["channel_binding"]
+
         # Rebuild URL without unsupported parameters
         new_query = urlencode(query_params, doseq=True)
-        database_url = urlunparse((
-            parsed.scheme,
-            parsed.netloc,
-            parsed.path,
-            parsed.params,
-            new_query,
-            parsed.fragment
-        ))
-        
+        database_url = urlunparse(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                parsed.params,
+                new_query,
+                parsed.fragment,
+            )
+        )
+
         engine_kwargs = {
             "echo": settings.DEBUG,  # Log SQL queries in debug mode
             "future": True,
@@ -78,7 +82,7 @@ def get_engine():
         }
         if connect_args:
             engine_kwargs["connect_args"] = connect_args
-        
+
         _engine = create_async_engine(database_url, **engine_kwargs)
     return _engine
 
