@@ -65,6 +65,15 @@ If Railway doesn't detect the service correctly:
 - Set it to: `budgex-backend-service` (if deploying from monorepo)
 - Or leave blank if the repo root is the backend service
 
+### 4.5. **Check Start Command (IMPORTANT!)**
+**CRITICAL**: Railway might have a startCommand override in the UI:
+- Go to your service → **Settings** → **Deploy**
+- Look for **"Start Command"** field
+- **Either:**
+  - **Option A**: Set it to `/app/start.sh` (our startup script)
+  - **Option B**: **Delete/clear** the startCommand field entirely (let Dockerfile CMD handle it)
+- **DO NOT** set it to `uvicorn app.main:app --host 0.0.0.0 --port $PORT` (this won't expand $PORT)
+
 ### 5. **Deploy**
 - Railway will automatically build and deploy
 - Watch the **Deployments** tab for build logs
