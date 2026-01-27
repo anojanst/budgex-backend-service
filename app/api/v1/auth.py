@@ -1,5 +1,7 @@
 """
-Authentication endpoints: Registration and Login with OTP
+Authentication endpoints: Unified OTP-based authentication
+Simplified to 2 endpoints: send-otp and verify-otp
+If user doesn't exist, they are automatically created on verify-otp
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -18,7 +20,6 @@ from app.utils.otp import (
     hash_otp,
     verify_otp,
     get_otp_expiration,
-    is_otp_expired,
 )
 from app.utils.email import send_otp_email
 from pydantic import BaseModel, EmailStr
@@ -47,24 +48,26 @@ class TokenResponse(BaseModel):
     user: dict
 
 
-@router.post("/register/send-otp", response_model=SendOTPResponse)
-async def send_registration_otp(
+@router.post("/send-otp", response_model=SendOTPResponse)
+async def send_otp(
     request: SendOTPRequest,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Send OTP for user registration
+    Send OTP to email address.
+    Works for both registration and login - if user doesn't exist, they'll be created on verify-otp
     """
     email = request.email.lower().strip()
     
-    # Check if user already exists
+    # Check if user exists (for informational purposes, but don't block)
     result = await db.execute(select(User).where(User.email == email))
-    existing_user = result.scalar_one_or_none()
+    user = result.scalar_one_or_none()
     
-    if existing_user:
+    # If user exists and is inactive, block the request
+    if user and not user.is_active:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User with this email already exists"
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive"
         )
     
     # Generate OTP
@@ -72,11 +75,11 @@ async def send_registration_otp(
     hashed_otp = hash_otp(otp_code)
     expires_at = get_otp_expiration()
     
-    # Store OTP in database
+    # Store OTP in database (no purpose needed - unified flow)
     otp_record = OTP(
         email=email,
         otp_code=hashed_otp,
-        purpose="registration",
+        purpose="auth",  # Unified purpose
         expires_at=expires_at,
         is_used=False
     )
@@ -84,11 +87,10 @@ async def send_registration_otp(
     await db.commit()
     
     # Send OTP via email
-    email_sent = await send_otp_email(email, otp_code, "registration")
+    email_sent = await send_otp_email(email, otp_code, "authentication")
     
     if not email_sent:
-        # Don't fail the request if email fails, but log it
-        # In production, you might want to handle this differently
+        # Log error but don't fail request
         pass
     
     return SendOTPResponse(
@@ -96,13 +98,15 @@ async def send_registration_otp(
     )
 
 
-@router.post("/register/verify-otp", response_model=TokenResponse)
-async def verify_registration_otp(
+@router.post("/verify-otp", response_model=TokenResponse)
+async def verify_otp(
     request: VerifyOTPRequest,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Verify OTP and create new user account
+    Verify OTP and authenticate user.
+    If user doesn't exist, automatically create them.
+    If user exists, log them in.
     """
     email = request.email.lower().strip()
     otp_code = request.otp
@@ -112,7 +116,7 @@ async def verify_registration_otp(
         select(OTP).where(
             and_(
                 OTP.email == email,
-                OTP.purpose == "registration",
+                OTP.purpose == "auth",
                 OTP.is_used == False,
                 OTP.expires_at > datetime.utcnow()
             )
@@ -132,161 +136,33 @@ async def verify_registration_otp(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid OTP code"
         )
-    
-    # Check if user already exists (race condition check)
-    user_result = await db.execute(select(User).where(User.email == email))
-    existing_user = user_result.scalar_one_or_none()
-    
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User already exists"
-        )
-    
-    # Create new user
-    new_user = User(
-        id=uuid4(),
-        email=email,
-        email_verified=True,
-        is_active=True,
-        last_login_at=datetime.utcnow()
-    )
-    db.add(new_user)
-    
-    # Mark OTP as used
-    otp_record.is_used = True
-    
-    await db.commit()
-    await db.refresh(new_user)
-    
-    # Generate JWT token
-    access_token = create_access_token(
-        data={"sub": str(new_user.id), "email": new_user.email}
-    )
-    
-    return TokenResponse(
-        access_token=access_token,
-        token_type="bearer",
-        user={
-            "id": str(new_user.id),
-            "email": new_user.email,
-            "email_verified": new_user.email_verified,
-            "is_active": new_user.is_active,
-        }
-    )
-
-
-@router.post("/login/send-otp", response_model=SendOTPResponse)
-async def send_login_otp(
-    request: SendOTPRequest,
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Send OTP for user login
-    """
-    email = request.email.lower().strip()
     
     # Check if user exists
-    result = await db.execute(select(User).where(User.email == email))
-    user = result.scalar_one_or_none()
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is inactive"
-        )
-    
-    # Generate OTP
-    otp_code = create_otp_code()
-    hashed_otp = hash_otp(otp_code)
-    expires_at = get_otp_expiration()
-    
-    # Store OTP in database
-    otp_record = OTP(
-        email=email,
-        otp_code=hashed_otp,
-        purpose="login",
-        expires_at=expires_at,
-        is_used=False
-    )
-    db.add(otp_record)
-    await db.commit()
-    
-    # Send OTP via email
-    email_sent = await send_otp_email(email, otp_code, "login")
-    
-    if not email_sent:
-        pass  # Log error but don't fail request
-    
-    return SendOTPResponse(
-        message="OTP sent to your email address"
-    )
-
-
-@router.post("/login/verify-otp", response_model=TokenResponse)
-async def verify_login_otp(
-    request: VerifyOTPRequest,
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Verify OTP and login user
-    """
-    email = request.email.lower().strip()
-    otp_code = request.otp
-    
-    # Find valid OTP
-    result = await db.execute(
-        select(OTP).where(
-            and_(
-                OTP.email == email,
-                OTP.purpose == "login",
-                OTP.is_used == False,
-                OTP.expires_at > datetime.utcnow()
-            )
-        ).order_by(OTP.created_at.desc())
-    )
-    otp_record = result.scalar_one_or_none()
-    
-    if not otp_record:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired OTP"
-        )
-    
-    # Verify OTP
-    if not verify_otp(otp_code, otp_record.otp_code):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid OTP code"
-        )
-    
-    # Get user
     user_result = await db.execute(select(User).where(User.email == email))
     user = user_result.scalar_one_or_none()
     
+    # Create user if they don't exist
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+        user = User(
+            id=uuid4(),
+            email=email,
+            email_verified=True,
+            is_active=True,
+            last_login_at=datetime.utcnow()
         )
-    
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is inactive"
-        )
+        db.add(user)
+    else:
+        # User exists - check if active
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User account is inactive"
+            )
+        # Update last login
+        user.last_login_at = datetime.utcnow()
     
     # Mark OTP as used
     otp_record.is_used = True
-    
-    # Update last login
-    user.last_login_at = datetime.utcnow()
     
     await db.commit()
     await db.refresh(user)

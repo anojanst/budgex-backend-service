@@ -347,31 +347,22 @@ alembic upgrade head
 
 ## Phase 4: Authentication API Endpoints ✅
 
-### 4.1 Registration Flow
-- [x] `POST /api/v1/auth/register/send-otp` - Send OTP to email for registration
+### 4.1 Unified Authentication Flow (Simplified)
+- [x] `POST /api/v1/auth/send-otp` - Send OTP to email (unified for registration/login)
   - Request: `{ "email": "user@example.com" }`
-  - Response: `{ "message": "OTP sent to email" }`
-  - Validations: Email format, email not already registered
-  - Rate limiting: Max 3 requests per email per hour (TODO: Add rate limiting)
+  - Response: `{ "message": "OTP sent to your email address" }`
+  - Validations: Email format, check if user is inactive (block if inactive)
+  - Behavior: Works for both new and existing users
+  - Rate limiting: TODO: Add rate limiting middleware
 
-- [x] `POST /api/v1/auth/register/verify-otp` - Verify OTP and create user
+- [x] `POST /api/v1/auth/verify-otp` - Verify OTP and authenticate (auto-creates user if needed)
   - Request: `{ "email": "user@example.com", "otp": "123456" }`
   - Response: `{ "user": {...}, "access_token": "...", "token_type": "bearer" }`
   - Validations: OTP valid, not expired, not used
-  - Actions: Create user with UUID, mark email as verified, generate JWT token
-
-### 4.2 Login Flow
-- [x] `POST /api/v1/auth/login/send-otp` - Send OTP to email for login
-  - Request: `{ "email": "user@example.com" }`
-  - Response: `{ "message": "OTP sent to email" }`
-  - Validations: Email exists, user is active
-  - Rate limiting: Max 5 requests per email per hour (TODO: Add rate limiting)
-
-- [x] `POST /api/v1/auth/login/verify-otp` - Verify OTP and login
-  - Request: `{ "email": "user@example.com", "otp": "123456" }`
-  - Response: `{ "user": {...}, "access_token": "...", "token_type": "bearer" }`
-  - Validations: OTP valid, not expired, not used
-  - Actions: Update `last_login_at`, generate JWT token, mark OTP as used
+  - Actions:
+    - If user doesn't exist: Create user with UUID, mark email as verified
+    - If user exists: Update `last_login_at`, log them in
+    - Generate JWT token, mark OTP as used
 
 ### 4.3 Token Management
 - [ ] See [FUTURE_TASKS.md](./FUTURE_TASKS.md) for optional authentication endpoints (refresh token, logout)

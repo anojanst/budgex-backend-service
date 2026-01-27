@@ -123,11 +123,9 @@ alembic downgrade -1
 
 ## API Endpoints
 
-### Authentication
-- `POST /api/v1/auth/register/send-otp` - Send OTP for registration
-- `POST /api/v1/auth/register/verify-otp` - Verify OTP and register
-- `POST /api/v1/auth/login/send-otp` - Send OTP for login
-- `POST /api/v1/auth/login/verify-otp` - Verify OTP and login
+### Authentication (Simplified - 2 endpoints)
+- `POST /api/v1/auth/send-otp` - Send OTP to email (works for both registration and login)
+- `POST /api/v1/auth/verify-otp` - Verify OTP and authenticate (auto-creates user if doesn't exist)
 
 ### Resources
 - `/api/v1/budgets/` - Budget management

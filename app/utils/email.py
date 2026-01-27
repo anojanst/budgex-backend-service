@@ -26,20 +26,20 @@ conf = ConnectionConfig(
 fastmail = FastMail(conf)
 
 
-async def send_otp_email(email: str, otp_code: str, purpose: str = "registration") -> bool:
+async def send_otp_email(email: str, otp_code: str, purpose: str = "authentication") -> bool:
     """
     Send OTP code via email
     
     Args:
         email: Recipient email address
         otp_code: The OTP code to send
-        purpose: Purpose of OTP ('registration' or 'login')
+        purpose: Purpose of OTP (default: 'authentication' for unified flow)
     
     Returns:
         True if email sent successfully, False otherwise
     """
     try:
-        subject = "Your BudgeX Verification Code" if purpose == "registration" else "Your BudgeX Login Code"
+        subject = "Your BudgeX Verification Code"
         
         message = MessageSchema(
             subject=subject,
