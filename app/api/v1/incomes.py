@@ -121,13 +121,16 @@ async def create_income(
         if not tag_result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
 
+    # Convert 0 to None for optional foreign keys
+    tag_id = income_data.tag_id if income_data.tag_id else None
+
     new_income = Income(
         user_id=current_user.id,
         name=income_data.name,
         amount=income_data.amount,
         category=income_data.category,
         date=income_data.date,
-        tag_id=income_data.tag_id,
+        tag_id=tag_id,
     )
 
     db.add(new_income)
@@ -170,7 +173,7 @@ async def update_income(
     if income_data.date is not None:
         income.date = income_data.date
     if income_data.tag_id is not None:
-        income.tag_id = income_data.tag_id
+        income.tag_id = income_data.tag_id if income_data.tag_id else None
 
     await db.commit()
     await db.refresh(income)

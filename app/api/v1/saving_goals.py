@@ -186,12 +186,15 @@ async def add_contribution(
         if not expense_result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Expense not found")
 
+    # Convert 0 to None for optional foreign keys
+    expense_id = contribution_data.expense_id if contribution_data.expense_id else None
+
     new_contribution = SavingContribution(
         goal_id=goal_id,
         user_id=current_user.id,
         amount=contribution_data.amount,
         date=contribution_data.date,
-        expense_id=contribution_data.expense_id,
+        expense_id=expense_id,
     )
 
     db.add(new_contribution)

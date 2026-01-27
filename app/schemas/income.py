@@ -5,8 +5,9 @@ Pydantic schemas for Income API
 from datetime import date as date_type
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.models.income import IncomeCategory
 
@@ -19,6 +20,14 @@ class IncomeBase(BaseModel):
     category: IncomeCategory = Field(..., description="Income category")
     date: date_type = Field(..., description="Income date")
     tag_id: Optional[int] = Field(None, description="Global tag ID (optional)")
+
+    @field_validator("tag_id", mode="before")
+    @classmethod
+    def convert_zero_to_none(cls, value: Optional[int]) -> Optional[int]:
+        """Convert 0 to None for optional foreign keys"""
+        if value == 0:
+            return None
+        return value
 
 
 class IncomeCreate(IncomeBase):
@@ -36,6 +45,14 @@ class IncomeUpdate(BaseModel):
     date: Optional[date_type] = None
     tag_id: Optional[int] = None
 
+    @field_validator("tag_id", mode="before")
+    @classmethod
+    def convert_zero_to_none(cls, value: Optional[int]) -> Optional[int]:
+        """Convert 0 to None for optional foreign keys"""
+        if value == 0:
+            return None
+        return value
+
 
 class IncomeResponse(IncomeBase):
     """Schema for income response"""
@@ -44,6 +61,14 @@ class IncomeResponse(IncomeBase):
     user_id: str
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("user_id", mode="before")
+    @classmethod
+    def convert_user_id(cls, value: UUID | str) -> str:
+        """Convert UUID to string if needed"""
+        if isinstance(value, UUID):
+            return str(value)
+        return value
 
     class Config:
         from_attributes = True

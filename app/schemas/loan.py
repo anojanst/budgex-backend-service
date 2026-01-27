@@ -6,8 +6,9 @@ from datetime import date as date_type
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class LoanBase(BaseModel):
@@ -58,6 +59,14 @@ class LoanRepaymentResponse(BaseModel):
     expense_id: Optional[int] = None
     created_at: datetime
 
+    @field_validator("user_id", mode="before")
+    @classmethod
+    def convert_user_id(cls, value: UUID | str) -> str:
+        """Convert UUID to string if needed"""
+        if isinstance(value, UUID):
+            return str(value)
+        return value
+
     class Config:
         from_attributes = True
 
@@ -69,6 +78,14 @@ class LoanResponse(LoanBase):
     user_id: str
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("user_id", mode="before")
+    @classmethod
+    def convert_user_id(cls, value: UUID | str) -> str:
+        """Convert UUID to string if needed"""
+        if isinstance(value, UUID):
+            return str(value)
+        return value
 
     class Config:
         from_attributes = True
@@ -93,3 +110,11 @@ class LoanRepaymentCreate(BaseModel):
     interest_amount: int = Field(..., ge=0, description="Interest portion in cents")
     status: str = Field(default="paid", description="Payment status: 'pending', 'paid', 'overdue'")
     expense_id: Optional[int] = Field(None, description="Linked expense ID if applicable")
+
+    @field_validator("expense_id", mode="before")
+    @classmethod
+    def convert_zero_to_none(cls, value: Optional[int]) -> Optional[int]:
+        """Convert 0 to None for optional foreign keys"""
+        if value == 0:
+            return None
+        return value

@@ -5,8 +5,9 @@ Pydantic schemas for Expense API
 from datetime import date as date_type
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ExpenseBase(BaseModel):
@@ -17,6 +18,14 @@ class ExpenseBase(BaseModel):
     date: date_type = Field(..., description="Expense date")
     budget_id: Optional[int] = Field(None, description="Budget ID (optional)")
     tag_id: Optional[int] = Field(None, description="Global tag ID (optional)")
+
+    @field_validator("budget_id", "tag_id", mode="before")
+    @classmethod
+    def convert_zero_to_none(cls, value: Optional[int]) -> Optional[int]:
+        """Convert 0 to None for optional foreign keys"""
+        if value == 0:
+            return None
+        return value
 
 
 class ExpenseCreate(ExpenseBase):
@@ -34,6 +43,14 @@ class ExpenseUpdate(BaseModel):
     budget_id: Optional[int] = None
     tag_id: Optional[int] = None
 
+    @field_validator("budget_id", "tag_id", mode="before")
+    @classmethod
+    def convert_zero_to_none(cls, value: Optional[int]) -> Optional[int]:
+        """Convert 0 to None for optional foreign keys"""
+        if value == 0:
+            return None
+        return value
+
 
 class ExpenseResponse(ExpenseBase):
     """Schema for expense response"""
@@ -42,6 +59,14 @@ class ExpenseResponse(ExpenseBase):
     user_id: str
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("user_id", mode="before")
+    @classmethod
+    def convert_user_id(cls, value: UUID | str) -> str:
+        """Convert UUID to string if needed"""
+        if isinstance(value, UUID):
+            return str(value)
+        return value
 
     class Config:
         from_attributes = True

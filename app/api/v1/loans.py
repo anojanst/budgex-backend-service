@@ -199,6 +199,9 @@ async def create_repayment(
         if not expense_result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Expense not found")
 
+    # Convert 0 to None for optional foreign keys
+    expense_id = repayment_data.expense_id if repayment_data.expense_id else None
+
     new_repayment = LoanRepayment(
         loan_id=loan_id,
         user_id=current_user.id,
@@ -207,7 +210,7 @@ async def create_repayment(
         principal_amount=repayment_data.principal_amount,
         interest_amount=repayment_data.interest_amount,
         status=repayment_data.status,
-        expense_id=repayment_data.expense_id,
+        expense_id=expense_id,
     )
 
     db.add(new_repayment)

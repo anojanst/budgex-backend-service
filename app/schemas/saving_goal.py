@@ -5,8 +5,9 @@ Pydantic schemas for Saving Goal API
 from datetime import date as date_type
 from datetime import datetime
 from typing import List, Optional
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class SavingContributionBase(BaseModel):
@@ -15,6 +16,14 @@ class SavingContributionBase(BaseModel):
     amount: int = Field(..., gt=0, description="Contribution amount in cents")
     date: date_type = Field(..., description="Contribution date")
     expense_id: Optional[int] = Field(None, description="Linked expense ID if applicable")
+
+    @field_validator("expense_id", mode="before")
+    @classmethod
+    def convert_zero_to_none(cls, value: Optional[int]) -> Optional[int]:
+        """Convert 0 to None for optional foreign keys"""
+        if value == 0:
+            return None
+        return value
 
 
 class SavingContributionCreate(SavingContributionBase):
@@ -30,6 +39,14 @@ class SavingContributionResponse(SavingContributionBase):
     goal_id: int
     user_id: str
     created_at: date_type
+
+    @field_validator("user_id", mode="before")
+    @classmethod
+    def convert_user_id(cls, value: UUID | str) -> str:
+        """Convert UUID to string if needed"""
+        if isinstance(value, UUID):
+            return str(value)
+        return value
 
     class Config:
         from_attributes = True
@@ -64,6 +81,14 @@ class SavingGoalResponse(SavingGoalBase):
     user_id: str
     created_at: date_type
     updated_at: datetime
+
+    @field_validator("user_id", mode="before")
+    @classmethod
+    def convert_user_id(cls, value: UUID | str) -> str:
+        """Convert UUID to string if needed"""
+        if isinstance(value, UUID):
+            return str(value)
+        return value
 
     class Config:
         from_attributes = True

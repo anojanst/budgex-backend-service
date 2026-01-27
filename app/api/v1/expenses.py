@@ -151,13 +151,17 @@ async def create_expense(
         if not tag_result.scalar_one_or_none():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
 
+    # Convert 0 to None for optional foreign keys (validator should handle this, but being explicit)
+    budget_id = expense_data.budget_id if expense_data.budget_id else None
+    tag_id = expense_data.tag_id if expense_data.tag_id else None
+
     new_expense = Expense(
         user_id=current_user.id,
         name=expense_data.name,
         amount=expense_data.amount,
         date=expense_data.date,
-        budget_id=expense_data.budget_id,
-        tag_id=expense_data.tag_id,
+        budget_id=budget_id,
+        tag_id=tag_id,
     )
 
     db.add(new_expense)
@@ -210,9 +214,9 @@ async def update_expense(
     if expense_data.date is not None:
         expense.date = expense_data.date
     if expense_data.budget_id is not None:
-        expense.budget_id = expense_data.budget_id
+        expense.budget_id = expense_data.budget_id if expense_data.budget_id else None
     if expense_data.tag_id is not None:
-        expense.tag_id = expense_data.tag_id
+        expense.tag_id = expense_data.tag_id if expense_data.tag_id else None
 
     await db.commit()
     await db.refresh(expense)

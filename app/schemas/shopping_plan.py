@@ -6,8 +6,9 @@ from datetime import date as date_type
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.models.shopping_plan import NeedWant, ShoppingPlanStatus
 
@@ -84,6 +85,14 @@ class ShoppingPlanResponse(ShoppingPlanBase):
     user_id: str
     created_at: date_type
     updated_at: datetime
+
+    @field_validator("user_id", mode="before")
+    @classmethod
+    def convert_user_id(cls, value: UUID | str) -> str:
+        """Convert UUID to string if needed"""
+        if isinstance(value, UUID):
+            return str(value)
+        return value
 
     class Config:
         from_attributes = True
