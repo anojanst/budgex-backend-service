@@ -133,7 +133,7 @@ def recalculate_pending_repayments(
     loan: Loan,
     pending_repayments: List[LoanRepayment],
     new_remaining_principal: int,
-) -> None:
+) -> List[LoanRepayment]:
     """
     Recalculate pending repayments after an additional payment
     
@@ -141,9 +141,12 @@ def recalculate_pending_repayments(
         loan: The loan object
         pending_repayments: List of pending repayment objects to recalculate
         new_remaining_principal: The new remaining principal after additional payment
+    
+    Returns:
+        List of repayments that should be deleted (those with 0 amount)
     """
     if not pending_repayments:
-        return
+        return []
 
     # Calculate period interest rate based on repayment frequency
     if loan.repayment_frequency.lower() == "weekly":
@@ -152,14 +155,13 @@ def recalculate_pending_repayments(
         period_rate = float(loan.interest_rate) / 100 / 12
 
     remaining_principal = new_remaining_principal
+    repayments_to_delete = []
 
     # Recalculate each pending repayment
     for i, repayment in enumerate(pending_repayments):
         if remaining_principal <= 0:
-            # If principal is fully paid, mark remaining repayments as not needed
-            repayment.principal_amount = 0
-            repayment.interest_amount = 0
-            repayment.amount = 0
+            # If principal is fully paid, mark repayment for deletion
+            repayments_to_delete.append(repayment)
             continue
 
         # Calculate interest for this payment
@@ -180,6 +182,11 @@ def recalculate_pending_repayments(
             principal_amount_payment = remaining_principal
             emi_adjusted = principal_amount_payment + interest_amount
 
+        # If the calculated amount is 0, mark for deletion
+        if emi_adjusted == 0:
+            repayments_to_delete.append(repayment)
+            continue
+
         # Update repayment amounts
         repayment.principal_amount = principal_amount_payment
         repayment.interest_amount = interest_amount
@@ -187,6 +194,8 @@ def recalculate_pending_repayments(
 
         # Update remaining principal
         remaining_principal -= principal_amount_payment
+
+    return repayments_to_delete
 
 
 @router.get("/", response_model=List[LoanResponse])
@@ -626,13 +635,32 @@ async def make_additional_payment(
     )
     pending_repayments = pending_repayments_result.scalars().all()
 
+    # Create a LoanRepayment record for the additional payment
+    # This ensures it shows up in the repayment schedule
+    additional_repayment = LoanRepayment(
+        loan_id=loan.id,
+        user_id=current_user.id,
+        scheduled_date=payment_date,
+        amount=payment_data.amount,
+        principal_amount=payment_data.amount,  # Entire amount goes to principal
+        interest_amount=0,  # Additional payments don't have interest
+        status="paid",
+        expense_id=new_expense.id,
+    )
+    db.add(additional_repayment)
+
     # Recalculate pending repayments with new principal
+    repayments_to_delete = []
     if pending_repayments:
-        recalculate_pending_repayments(loan, pending_repayments, new_remaining_principal)
+        repayments_to_delete = recalculate_pending_repayments(loan, pending_repayments, new_remaining_principal)
+
+        # Delete repayments with 0 amount
+        for repayment in repayments_to_delete:
+            await db.delete(repayment)
 
         # Update next_due_date to the first pending repayment with amount > 0
         for repayment in pending_repayments:
-            if repayment.amount > 0:
+            if repayment not in repayments_to_delete and repayment.amount > 0:
                 loan.next_due_date = repayment.scheduled_date
                 break
         else:
