@@ -26,6 +26,7 @@ from app.schemas.loan import (
     LoanUpdate,
     LoanWithRepayments,
     MarkRepaymentPaid,
+    PaymentDueSummary,
 )
 
 router = APIRouter()
@@ -211,6 +212,39 @@ async def list_loans(
     return loans
 
 
+@router.get("/payments-due", response_model=PaymentDueSummary)
+async def get_payments_due(
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get count and total amount of all unpaid repayments due as of today
+    """
+    today = date.today()
+
+    # Get all unpaid repayments (status != 'paid') that are due (scheduled_date <= today)
+    # for loans belonging to the current user
+    result = await db.execute(
+        select(
+            func.count(LoanRepayment.id).label("count"),
+            func.coalesce(func.sum(LoanRepayment.amount), 0).label("total_amount"),
+        )
+        .select_from(LoanRepayment)
+        .join(Loan)
+        .where(
+            Loan.user_id == current_user.id,
+            LoanRepayment.status != "paid",
+            LoanRepayment.scheduled_date <= today,
+        )
+    )
+
+    summary = result.first()
+    count = summary.count if summary.count else 0
+    total_amount = int(summary.total_amount) if summary.total_amount else 0
+
+    return PaymentDueSummary(count=count, total_amount=total_amount)
+
+
 @router.get("/{loan_id}", response_model=LoanWithRepayments)
 async def get_loan(
     loan_id: int,
@@ -327,6 +361,29 @@ async def update_loan(
         loan.next_due_date = loan_data.next_due_date
     if loan_data.is_paid_off is not None:
         loan.is_paid_off = loan_data.is_paid_off
+
+    # If remaining_principal is set to 0 or is_paid_off is set to True, remove all pending repayments
+    should_remove_pending = False
+    if loan_data.remaining_principal is not None and loan_data.remaining_principal == 0:
+        should_remove_pending = True
+        loan.is_paid_off = True
+    elif loan_data.is_paid_off is not None and loan_data.is_paid_off is True:
+        should_remove_pending = True
+        loan.remaining_principal = 0
+
+    if should_remove_pending:
+        # Get all pending repayments
+        pending_repayments_result = await db.execute(
+            select(LoanRepayment).where(
+                LoanRepayment.loan_id == loan.id,
+                LoanRepayment.status == "pending",
+            )
+        )
+        pending_repayments = pending_repayments_result.scalars().all()
+
+        # Delete all pending repayments
+        for repayment in pending_repayments:
+            await db.delete(repayment)
 
     await db.commit()
     await db.refresh(loan)

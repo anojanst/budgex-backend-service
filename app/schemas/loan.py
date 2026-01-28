@@ -155,3 +155,10 @@ class AdditionalPayment(BaseModel):
         if value == 0:
             return None
         return value
+
+
+class PaymentDueSummary(BaseModel):
+    """Schema for payment due summary"""
+
+    count: int = Field(..., ge=0, description="Number of unpaid repayments due as of today")
+    total_amount: int = Field(..., ge=0, description="Total amount of unpaid repayments due as of today in cents")
