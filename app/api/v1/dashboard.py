@@ -2,7 +2,7 @@
 Dashboard API endpoints
 """
 
-from datetime import date as date_type
+from datetime import date as date_type, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -264,13 +264,14 @@ async def get_income_expense_balance_chart(
     """
     Get line chart data for income, expense and balance over time.
 
-    If no dates are provided, defaults to the last 30 days.
+    If no dates are provided, defaults to the current month.
     """
     today = date_type.today()
     if end_date is None:
         end_date = today
     if start_date is None:
-        start_date = end_date - timedelta(days=30)
+        # Default to first day of current month
+        start_date = date_type(today.year, today.month, 1)
 
     # Income per date
     income_result = await db.execute(
