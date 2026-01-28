@@ -18,6 +18,7 @@ from app.database import get_db
 from app.models.loan import Loan, LoanRepayment
 from app.models.user import User
 from app.schemas.loan import (
+    AdditionalPayment,
     LoanCreate,
     LoanRepaymentCreate,
     LoanRepaymentResponse,
@@ -126,6 +127,66 @@ def generate_repayment_schedule(
         current_date = date_increment(current_date)
     
     return repayments
+
+
+def recalculate_pending_repayments(
+    loan: Loan,
+    pending_repayments: List[LoanRepayment],
+    new_remaining_principal: int,
+) -> None:
+    """
+    Recalculate pending repayments after an additional payment
+    
+    Args:
+        loan: The loan object
+        pending_repayments: List of pending repayment objects to recalculate
+        new_remaining_principal: The new remaining principal after additional payment
+    """
+    if not pending_repayments:
+        return
+
+    # Calculate period interest rate based on repayment frequency
+    if loan.repayment_frequency.lower() == "weekly":
+        period_rate = float(loan.interest_rate) / 100 / 52
+    else:
+        period_rate = float(loan.interest_rate) / 100 / 12
+
+    remaining_principal = new_remaining_principal
+
+    # Recalculate each pending repayment
+    for i, repayment in enumerate(pending_repayments):
+        if remaining_principal <= 0:
+            # If principal is fully paid, mark remaining repayments as not needed
+            repayment.principal_amount = 0
+            repayment.interest_amount = 0
+            repayment.amount = 0
+            continue
+
+        # Calculate interest for this payment
+        interest_amount = int(remaining_principal * period_rate)
+
+        # Principal amount is EMI minus interest
+        principal_amount_payment = loan.emi - interest_amount
+
+        # For the last repayment, adjust to ensure remaining principal is fully paid
+        if i == len(pending_repayments) - 1:
+            principal_amount_payment = remaining_principal
+            emi_adjusted = principal_amount_payment + interest_amount
+        else:
+            emi_adjusted = loan.emi
+
+        # Ensure principal doesn't exceed remaining principal
+        if principal_amount_payment > remaining_principal:
+            principal_amount_payment = remaining_principal
+            emi_adjusted = principal_amount_payment + interest_amount
+
+        # Update repayment amounts
+        repayment.principal_amount = principal_amount_payment
+        repayment.interest_amount = interest_amount
+        repayment.amount = emi_adjusted
+
+        # Update remaining principal
+        remaining_principal -= principal_amount_payment
 
 
 @router.get("/", response_model=List[LoanResponse])
@@ -362,7 +423,7 @@ async def get_repayments(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan not found")
 
     result = await db.execute(
-        select(LoanRepayment).where(LoanRepayment.loan_id == loan_id).order_by(LoanRepayment.scheduled_date.desc())
+        select(LoanRepayment).where(LoanRepayment.loan_id == loan_id).order_by(LoanRepayment.scheduled_date.asc())
     )
     repayments = result.scalars().all()
 
@@ -475,3 +536,110 @@ async def mark_repayment_paid(
     await db.refresh(repayment)
 
     return repayment
+
+
+@router.post(
+    "/{loan_id}/additional-payment",
+    response_model=LoanResponse,
+)
+async def make_additional_payment(
+    loan_id: int,
+    payment_data: AdditionalPayment,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Make an additional payment on a loan and recalculate pending repayments
+    """
+    from app.models.expense import Expense
+    from app.models.budget import Budget
+    from app.models.tag import Tag
+
+    # Get loan
+    loan_result = await db.execute(select(Loan).where(Loan.id == loan_id, Loan.user_id == current_user.id))
+    loan = loan_result.scalar_one_or_none()
+
+    if not loan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan not found")
+
+    if loan.is_paid_off:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Loan is already paid off",
+        )
+
+    # Validate budget_id if provided
+    budget_id = payment_data.budget_id if payment_data.budget_id else None
+    if budget_id:
+        budget_result = await db.execute(
+            select(Budget).where(Budget.id == budget_id, Budget.user_id == current_user.id)
+        )
+        if not budget_result.scalar_one_or_none():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found")
+
+    # Validate tag_id if provided
+    tag_id = payment_data.tag_id if payment_data.tag_id else None
+    if tag_id:
+        tag_result = await db.execute(select(Tag).where(Tag.id == tag_id, Tag.user_id == current_user.id))
+        if not tag_result.scalar_one_or_none():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
+
+    # Create expense for the additional payment
+    payment_date = payment_data.payment_date if payment_data.payment_date else date.today()
+    expense_name = (
+        payment_data.expense_name
+        if payment_data.expense_name
+        else f"Additional Loan Payment - {loan.lender}"
+    )
+
+    new_expense = Expense(
+        user_id=current_user.id,
+        name=expense_name,
+        amount=payment_data.amount,
+        date=payment_date,
+        budget_id=budget_id,
+        tag_id=tag_id,
+    )
+
+    db.add(new_expense)
+    await db.flush()  # Flush to get expense ID
+
+    # Reduce remaining principal by the additional payment amount
+    # The entire additional payment goes towards principal
+    new_remaining_principal = max(0, loan.remaining_principal - payment_data.amount)
+
+    # Update loan remaining principal
+    loan.remaining_principal = new_remaining_principal
+
+    # Check if loan is fully paid off
+    if new_remaining_principal == 0:
+        loan.is_paid_off = True
+
+    # Get all pending repayments
+    pending_repayments_result = await db.execute(
+        select(LoanRepayment)
+        .where(
+            LoanRepayment.loan_id == loan.id,
+            LoanRepayment.status == "pending",
+        )
+        .order_by(LoanRepayment.scheduled_date.asc())
+    )
+    pending_repayments = pending_repayments_result.scalars().all()
+
+    # Recalculate pending repayments with new principal
+    if pending_repayments:
+        recalculate_pending_repayments(loan, pending_repayments, new_remaining_principal)
+
+        # Update next_due_date to the first pending repayment with amount > 0
+        for repayment in pending_repayments:
+            if repayment.amount > 0:
+                loan.next_due_date = repayment.scheduled_date
+                break
+        else:
+            # If all repayments are zero (loan fully paid), keep current next_due_date
+            pass
+
+    await db.commit()
+    await db.refresh(loan)
+
+    return loan

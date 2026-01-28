@@ -135,3 +135,23 @@ class MarkRepaymentPaid(BaseModel):
         if value == 0:
             return None
         return value
+
+
+class AdditionalPayment(BaseModel):
+    """Schema for making an additional payment on a loan"""
+
+    amount: int = Field(..., gt=0, description="Additional payment amount in cents")
+    payment_date: Optional[date_type] = Field(None, description="Payment date (defaults to today)")
+    expense_name: Optional[str] = Field(
+        None, max_length=255, description="Expense name (defaults to 'Additional Loan Payment - {lender}')"
+    )
+    budget_id: Optional[int] = Field(None, description="Budget ID to link expense to")
+    tag_id: Optional[int] = Field(None, description="Tag ID to link expense to")
+
+    @field_validator("budget_id", "tag_id", mode="before")
+    @classmethod
+    def convert_zero_to_none(cls, value: Optional[int]) -> Optional[int]:
+        """Convert 0 to None for optional foreign keys"""
+        if value == 0:
+            return None
+        return value
