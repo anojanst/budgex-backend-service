@@ -65,6 +65,7 @@ from app.api.v1 import (
     auth,
     balance_history,
     budgets,
+    dashboard,
     expenses,
     incomes,
     loans,
@@ -77,6 +78,7 @@ from app.api.v1 import (
 app.include_router(auth.router, prefix=settings.API_V1_PREFIX, tags=["auth"])
 app.include_router(users.router, prefix=settings.API_V1_PREFIX, tags=["users"])
 app.include_router(budgets.router, prefix=f"{settings.API_V1_PREFIX}/budgets", tags=["budgets"])
+app.include_router(dashboard.router, prefix=f"{settings.API_V1_PREFIX}/dashboard", tags=["dashboard"])
 app.include_router(tags.router, prefix=f"{settings.API_V1_PREFIX}/tags", tags=["tags"])
 app.include_router(expenses.router, prefix=f"{settings.API_V1_PREFIX}/expenses", tags=["expenses"])
 app.include_router(incomes.router, prefix=f"{settings.API_V1_PREFIX}/incomes", tags=["incomes"])
