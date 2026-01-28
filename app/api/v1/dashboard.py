@@ -3,9 +3,10 @@ Dashboard API endpoints
 """
 
 from datetime import date as date_type
+from typing import Optional
 
-from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_active_user
@@ -17,8 +18,14 @@ from app.models.loan import Loan, LoanRepayment
 from app.models.saving_goal import SavingContribution, SavingGoal
 from app.models.user import User
 from app.schemas.dashboard import (
+    BudgetComparisonChart,
+    BudgetComparisonItem,
+    BudgetPieChart,
+    BudgetPieSlice,
     BudgetSummaryAggregate,
     DashboardSummary,
+    IncomeExpenseBalanceChart,
+    IncomeExpenseBalancePoint,
     IncomeExpenseSummary,
     LoanSummaryAggregate,
     SavingGoalsSummary,
@@ -160,5 +167,155 @@ async def get_dashboard_summary(
         loans=loans_summary,
         saving_goals=saving_goals_summary,
     )
+
+
+@router.get("/charts/budget-comparison", response_model=BudgetComparisonChart)
+async def get_budget_comparison_chart(
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get budget comparison data:
+
+    - For each budget: amount, total_spent, remaining
+    """
+    # Get all budgets for user
+    budgets_result = await db.execute(
+        select(Budget).where(Budget.user_id == current_user.id).order_by(Budget.created_at.desc())
+    )
+    budgets = budgets_result.scalars().all()
+
+    items: list[BudgetComparisonItem] = []
+
+    for budget in budgets:
+        expense_result = await db.execute(
+            select(func.coalesce(func.sum(Expense.amount), 0)).where(
+                Expense.user_id == current_user.id,
+                Expense.budget_id == budget.id,
+            )
+        )
+        total_spent = int(expense_result.scalar_one() or 0)
+        remaining = budget.amount - total_spent
+
+        items.append(
+            BudgetComparisonItem(
+                budget_id=budget.id,
+                name=budget.name,
+                amount=budget.amount,
+                total_spent=total_spent,
+                remaining=remaining,
+            )
+        )
+
+    return BudgetComparisonChart(items=items)
+
+
+@router.get("/charts/pie-chart", response_model=BudgetPieChart)
+async def get_budget_pie_chart(
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get budget pie chart data:
+
+    - Distribution of expenses across budgets
+    - Includes an 'Unassigned' slice for expenses without a budget
+    """
+    # Spend per budget
+    per_budget_result = await db.execute(
+        select(
+            Budget.id.label("budget_id"),
+            Budget.name.label("name"),
+            func.coalesce(func.sum(Expense.amount), 0).label("amount"),
+        )
+        .outerjoin(Expense, and_(Expense.budget_id == Budget.id, Expense.user_id == current_user.id))
+        .where(Budget.user_id == current_user.id)
+        .group_by(Budget.id, Budget.name)
+    )
+    per_budget_rows = per_budget_result.all()
+
+    slices: list[BudgetPieSlice] = []
+
+    for row in per_budget_rows:
+        amount = int(row.amount or 0)
+        if amount > 0:
+            slices.append(BudgetPieSlice(label=row.name, amount=amount))
+
+    # Unassigned expenses (no budget_id)
+    unassigned_result = await db.execute(
+        select(func.coalesce(func.sum(Expense.amount), 0)).where(
+            Expense.user_id == current_user.id, Expense.budget_id.is_(None)
+        )
+    )
+    unassigned_amount = int(unassigned_result.scalar_one() or 0)
+    if unassigned_amount > 0:
+        slices.append(BudgetPieSlice(label="Unassigned", amount=unassigned_amount))
+
+    return BudgetPieChart(slices=slices)
+
+
+@router.get("/charts/income-expense-balance", response_model=IncomeExpenseBalanceChart)
+async def get_income_expense_balance_chart(
+    start_date: Optional[date_type] = Query(None, description="Start date for the chart"),
+    end_date: Optional[date_type] = Query(None, description="End date for the chart"),
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get line chart data for income, expense and balance over time.
+
+    If no dates are provided, defaults to the last 30 days.
+    """
+    today = date_type.today()
+    if end_date is None:
+        end_date = today
+    if start_date is None:
+        start_date = end_date - timedelta(days=30)
+
+    # Income per date
+    income_result = await db.execute(
+        select(Income.date, func.coalesce(func.sum(Income.amount), 0).label("amount"))
+        .where(
+            Income.user_id == current_user.id,
+            Income.date >= start_date,
+            Income.date <= end_date,
+        )
+        .group_by(Income.date)
+    )
+    income_rows = income_result.all()
+    income_by_date = {row.date: int(row.amount or 0) for row in income_rows}
+
+    # Expense per date
+    expense_result = await db.execute(
+        select(Expense.date, func.coalesce(func.sum(Expense.amount), 0).label("amount"))
+        .where(
+            Expense.user_id == current_user.id,
+            Expense.date >= start_date,
+            Expense.date <= end_date,
+        )
+        .group_by(Expense.date)
+    )
+    expense_rows = expense_result.all()
+    expense_by_date = {row.date: int(row.amount or 0) for row in expense_rows}
+
+    # Build points for each date in range
+    points: list[IncomeExpenseBalancePoint] = []
+    current = start_date
+    while current <= end_date:
+        income = income_by_date.get(current, 0)
+        expense = expense_by_date.get(current, 0)
+        balance = income - expense
+        points.append(
+            IncomeExpenseBalancePoint(
+                date=current,
+                income=income,
+                expense=expense,
+                balance=balance,
+            )
+        )
+        current = current + timedelta(days=1)
+
+    return IncomeExpenseBalanceChart(points=points)
+
 
 

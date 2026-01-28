@@ -3,7 +3,7 @@ Pydantic schemas for Dashboard API
 """
 
 from datetime import date as date_type
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -54,5 +54,50 @@ class DashboardSummary(BaseModel):
     income_expense: IncomeExpenseSummary
     loans: LoanSummaryAggregate
     saving_goals: SavingGoalsSummary
+
+
+class BudgetComparisonItem(BaseModel):
+    """Single budget entry for comparison chart."""
+
+    budget_id: int
+    name: str
+    amount: int = Field(..., ge=0, description="Budget amount in cents")
+    total_spent: int = Field(..., ge=0, description="Total spent in this budget in cents")
+    remaining: int = Field(..., description="Remaining amount in this budget in cents")
+
+
+class BudgetComparisonChart(BaseModel):
+    """Budget comparison chart data."""
+
+    items: List[BudgetComparisonItem] = Field(default_factory=list)
+
+
+class BudgetPieSlice(BaseModel):
+    """Slice of the budget pie chart."""
+
+    label: str = Field(..., description="Budget name or 'Unassigned'")
+    amount: int = Field(..., ge=0, description="Total spent amount in cents")
+
+
+class BudgetPieChart(BaseModel):
+    """Budget pie chart data."""
+
+    slices: List[BudgetPieSlice] = Field(default_factory=list)
+
+
+class IncomeExpenseBalancePoint(BaseModel):
+    """Single data point for income-expense-balance chart."""
+
+    date: date_type
+    income: int = Field(..., ge=0, description="Income amount in cents for this date")
+    expense: int = Field(..., ge=0, description="Expense amount in cents for this date")
+    balance: int = Field(..., description="Net balance (income - expense) for this date in cents")
+
+
+class IncomeExpenseBalanceChart(BaseModel):
+    """Line chart data for income, expense and balance over time."""
+
+    points: List[IncomeExpenseBalancePoint] = Field(default_factory=list)
+
 
 
