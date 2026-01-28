@@ -4,8 +4,11 @@ Loan API endpoints
 
 from datetime import date as date_type
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import List
+from uuid import UUID
 
+from dateutil.relativedelta import relativedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +27,104 @@ from app.schemas.loan import (
 )
 
 router = APIRouter()
+
+
+def generate_repayment_schedule(
+    loan_id: int,
+    user_id: UUID,
+    principal_amount: int,
+    interest_rate: Decimal,
+    tenure_months: int,
+    repayment_frequency: str,
+    emi: int,
+    start_date: date_type,
+) -> List[LoanRepayment]:
+    """
+    Generate repayment schedule for a loan
+    
+    Args:
+        loan_id: Loan ID
+        user_id: User ID
+        principal_amount: Initial principal amount in cents
+        interest_rate: Annual interest rate as Decimal (e.g., 5.5 for 5.5%)
+        tenure_months: Loan tenure in months
+        repayment_frequency: 'monthly' or 'weekly'
+        emi: EMI amount in cents
+        start_date: First payment date
+    
+    Returns:
+        List of LoanRepayment objects
+    """
+    repayments = []
+    remaining_principal = principal_amount
+    current_date = start_date
+    
+    # Calculate number of payments and date increment
+    if repayment_frequency.lower() == "monthly":
+        num_payments = tenure_months
+        date_increment = lambda d: d + relativedelta(months=1)
+    elif repayment_frequency.lower() == "weekly":
+        num_payments = tenure_months * 4  # Approximate: 4 weeks per month
+        date_increment = lambda d: d + timedelta(weeks=1)
+    else:
+        # Default to monthly if frequency is not recognized
+        num_payments = tenure_months
+        date_increment = lambda d: d + relativedelta(months=1)
+    
+    # Monthly interest rate (annual rate / 12)
+    monthly_rate = float(interest_rate) / 100 / 12
+    
+    for payment_num in range(1, num_payments + 1):
+        # Calculate interest for this payment
+        # For monthly: interest = remaining_principal * monthly_rate
+        # For weekly: interest = remaining_principal * (annual_rate / 100 / 52)
+        if repayment_frequency.lower() == "weekly":
+            period_rate = float(interest_rate) / 100 / 52
+        else:
+            period_rate = monthly_rate
+        
+        interest_amount = int(remaining_principal * period_rate)
+        
+        # Principal amount is EMI minus interest
+        principal_amount_payment = emi - interest_amount
+        
+        # For the last payment, adjust to ensure remaining principal is fully paid
+        if payment_num == num_payments:
+            principal_amount_payment = remaining_principal
+            emi_adjusted = principal_amount_payment + interest_amount
+        else:
+            emi_adjusted = emi
+        
+        # Ensure principal doesn't go negative
+        if principal_amount_payment > remaining_principal:
+            principal_amount_payment = remaining_principal
+            emi_adjusted = principal_amount_payment + interest_amount
+        
+        # Create repayment record
+        repayment = LoanRepayment(
+            loan_id=loan_id,
+            user_id=user_id,
+            scheduled_date=current_date,
+            amount=emi_adjusted,
+            principal_amount=principal_amount_payment,
+            interest_amount=interest_amount,
+            status="pending",
+            expense_id=None,
+        )
+        
+        repayments.append(repayment)
+        
+        # Update remaining principal
+        remaining_principal -= principal_amount_payment
+        
+        # Break if principal is fully paid
+        if remaining_principal <= 0:
+            break
+        
+        # Move to next payment date
+        current_date = date_increment(current_date)
+    
+    return repayments
 
 
 @router.get("/", response_model=List[LoanResponse])
@@ -56,7 +157,7 @@ async def get_loan(
 
     # Get repayments
     repayments_result = await db.execute(
-        select(LoanRepayment).where(LoanRepayment.loan_id == loan_id).order_by(LoanRepayment.payment_date.desc())
+        select(LoanRepayment).where(LoanRepayment.loan_id == loan_id).order_by(LoanRepayment.scheduled_date.desc())
     )
     repayments = repayments_result.scalars().all()
 
@@ -80,7 +181,7 @@ async def create_loan(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Create a new loan
+    Create a new loan and automatically generate repayment schedule
     """
     new_loan = Loan(
         user_id=current_user.id,
@@ -96,6 +197,24 @@ async def create_loan(
     )
 
     db.add(new_loan)
+    await db.flush()  # Flush to get the loan ID without committing
+
+    # Generate repayment schedule
+    repayments = generate_repayment_schedule(
+        loan_id=new_loan.id,
+        user_id=current_user.id,  # UUID type
+        principal_amount=loan_data.remaining_principal,  # Use remaining_principal as starting point
+        interest_rate=loan_data.interest_rate,
+        tenure_months=loan_data.tenure_months,
+        repayment_frequency=loan_data.repayment_frequency,
+        emi=loan_data.emi,
+        start_date=loan_data.next_due_date,
+    )
+
+    # Add all repayments to the session
+    for repayment in repayments:
+        db.add(repayment)
+
     await db.commit()
     await db.refresh(new_loan)
 

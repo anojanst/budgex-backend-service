@@ -36,4 +36,5 @@ aiosqlite==0.20.0  # For in-memory SQLite testing
 # Utilities
 python-multipart==0.0.12  # For file uploads (if needed)
 email-validator==2.2.0  # Email validation
+python-dateutil==2.9.0  # For date calculations (loan repayment schedules)
 
