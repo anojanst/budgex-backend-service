@@ -2,7 +2,7 @@
 Loan API endpoints
 """
 
-from datetime import date as date_type
+from datetime import date, date as date_type
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import List
@@ -24,6 +24,7 @@ from app.schemas.loan import (
     LoanResponse,
     LoanUpdate,
     LoanWithRepayments,
+    MarkRepaymentPaid,
 )
 
 router = APIRouter()
@@ -366,3 +367,111 @@ async def get_repayments(
     repayments = result.scalars().all()
 
     return repayments
+
+
+@router.patch(
+    "/repayments/{repayment_id}/mark-paid",
+    response_model=LoanRepaymentResponse,
+)
+async def mark_repayment_paid(
+    repayment_id: int,
+    payment_data: MarkRepaymentPaid,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Mark a repayment as paid and create an associated expense
+    """
+    from app.models.expense import Expense
+    from app.models.budget import Budget
+    from app.models.tag import Tag
+
+    # Get repayment with loan
+    repayment_result = await db.execute(
+        select(LoanRepayment)
+        .join(Loan)
+        .where(
+            LoanRepayment.id == repayment_id,
+            Loan.user_id == current_user.id,
+        )
+    )
+    repayment = repayment_result.scalar_one_or_none()
+
+    if not repayment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Repayment not found")
+
+    # Check if already paid
+    if repayment.status == "paid":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Repayment is already marked as paid",
+        )
+
+    # Get the loan
+    loan_result = await db.execute(select(Loan).where(Loan.id == repayment.loan_id))
+    loan = loan_result.scalar_one_or_none()
+
+    if not loan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan not found")
+
+    # Validate budget_id if provided
+    budget_id = payment_data.budget_id if payment_data.budget_id else None
+    if budget_id:
+        budget_result = await db.execute(
+            select(Budget).where(Budget.id == budget_id, Budget.user_id == current_user.id)
+        )
+        if not budget_result.scalar_one_or_none():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Budget not found")
+
+    # Validate tag_id if provided
+    tag_id = payment_data.tag_id if payment_data.tag_id else None
+    if tag_id:
+        tag_result = await db.execute(select(Tag).where(Tag.id == tag_id, Tag.user_id == current_user.id))
+        if not tag_result.scalar_one_or_none():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
+
+    # Create expense for the payment
+    payment_date = payment_data.payment_date if payment_data.payment_date else date.today()
+    expense_name = payment_data.expense_name if payment_data.expense_name else f"Loan Payment - {loan.lender}"
+
+    new_expense = Expense(
+        user_id=current_user.id,
+        name=expense_name,
+        amount=repayment.amount,
+        date=payment_date,
+        budget_id=budget_id,
+        tag_id=tag_id,
+    )
+
+    db.add(new_expense)
+    await db.flush()  # Flush to get expense ID
+
+    # Update repayment status and link expense
+    repayment.status = "paid"
+    repayment.expense_id = new_expense.id
+
+    # Update loan remaining principal
+    loan.remaining_principal = max(0, loan.remaining_principal - repayment.principal_amount)
+
+    # Check if loan is fully paid off
+    if loan.remaining_principal == 0:
+        loan.is_paid_off = True
+
+    # Update next_due_date to the next pending repayment
+    next_repayment_result = await db.execute(
+        select(LoanRepayment)
+        .where(
+            LoanRepayment.loan_id == loan.id,
+            LoanRepayment.status == "pending",
+        )
+        .order_by(LoanRepayment.scheduled_date.asc())
+        .limit(1)
+    )
+    next_repayment = next_repayment_result.scalar_one_or_none()
+    if next_repayment:
+        loan.next_due_date = next_repayment.scheduled_date
+
+    await db.commit()
+    await db.refresh(repayment)
+
+    return repayment
