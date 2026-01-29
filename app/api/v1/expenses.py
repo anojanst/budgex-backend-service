@@ -169,9 +169,14 @@ async def create_expense(
     await db.refresh(new_expense)
 
     # Recalculate balance history from expense date onwards
-    from app.api.v1.balance_history import recalculate_balance_from_date
-
-    await recalculate_balance_from_date(db, current_user.id, expense_data.date)
+    try:
+        from app.api.v1.balance_history import recalculate_balance_from_date
+        await recalculate_balance_from_date(db, current_user.id, expense_data.date)
+    except Exception as e:
+        # Log error but don't fail the request
+        # Balance can be recalculated manually if needed
+        import logging
+        logging.error(f"Failed to recalculate balance history: {e}")
 
     return new_expense
 
@@ -232,10 +237,13 @@ async def update_expense(
     await db.refresh(expense)
 
     # Recalculate balance history from the earliest affected date onwards
-    from app.api.v1.balance_history import recalculate_balance_from_date
-
-    earliest_date = min(dates_to_recalculate)
-    await recalculate_balance_from_date(db, current_user.id, earliest_date)
+    try:
+        from app.api.v1.balance_history import recalculate_balance_from_date
+        earliest_date = min(dates_to_recalculate)
+        await recalculate_balance_from_date(db, current_user.id, earliest_date)
+    except Exception as e:
+        import logging
+        logging.error(f"Failed to recalculate balance history: {e}")
 
     return expense
 
@@ -262,9 +270,12 @@ async def delete_expense(
     await db.commit()
 
     # Recalculate balance history from expense date onwards
-    from app.api.v1.balance_history import recalculate_balance_from_date
-
-    await recalculate_balance_from_date(db, current_user.id, expense_date)
+    try:
+        from app.api.v1.balance_history import recalculate_balance_from_date
+        await recalculate_balance_from_date(db, current_user.id, expense_date)
+    except Exception as e:
+        import logging
+        logging.error(f"Failed to recalculate balance history: {e}")
 
     return None
 

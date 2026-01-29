@@ -45,15 +45,21 @@ async def update_balance_history_for_date(db: AsyncSession, user_id, target_date
     )
     total_expense = int(expense_result.scalar_one() or 0)
 
-    # Get previous day's balance
-    previous_day = target_date - timedelta(days=1)
+    # Get most recent balance before target_date (could be previous day or earlier)
     previous_balance_result = await db.execute(
         select(BalanceHistory.balance)
-        .where(BalanceHistory.user_id == user_uuid, BalanceHistory.date == previous_day)
+        .where(BalanceHistory.user_id == user_uuid, BalanceHistory.date < target_date)
         .order_by(BalanceHistory.date.desc())
         .limit(1)
     )
-    previous_balance = int(previous_balance_result.scalar_one() or 0)
+    previous_balance_row = previous_balance_result.scalar_one_or_none()
+    if previous_balance_row is not None:
+        try:
+            previous_balance = int(previous_balance_row)
+        except (ValueError, TypeError):
+            previous_balance = 0
+    else:
+        previous_balance = 0
 
     # Calculate new balance
     balance = previous_balance + total_income - total_expense

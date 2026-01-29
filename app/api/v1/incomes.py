@@ -138,9 +138,14 @@ async def create_income(
     await db.refresh(new_income)
 
     # Recalculate balance history from income date onwards
-    from app.api.v1.balance_history import recalculate_balance_from_date
-
-    await recalculate_balance_from_date(db, current_user.id, income_data.date)
+    try:
+        from app.api.v1.balance_history import recalculate_balance_from_date
+        await recalculate_balance_from_date(db, current_user.id, income_data.date)
+    except Exception as e:
+        # Log error but don't fail the request
+        # Balance can be recalculated manually if needed
+        import logging
+        logging.error(f"Failed to recalculate balance history: {e}")
 
     return new_income
 
@@ -189,10 +194,13 @@ async def update_income(
     await db.refresh(income)
 
     # Recalculate balance history from the earliest affected date onwards
-    from app.api.v1.balance_history import recalculate_balance_from_date
-
-    earliest_date = min(dates_to_recalculate)
-    await recalculate_balance_from_date(db, current_user.id, earliest_date)
+    try:
+        from app.api.v1.balance_history import recalculate_balance_from_date
+        earliest_date = min(dates_to_recalculate)
+        await recalculate_balance_from_date(db, current_user.id, earliest_date)
+    except Exception as e:
+        import logging
+        logging.error(f"Failed to recalculate balance history: {e}")
 
     return income
 
@@ -219,8 +227,11 @@ async def delete_income(
     await db.commit()
 
     # Recalculate balance history from income date onwards
-    from app.api.v1.balance_history import recalculate_balance_from_date
-
-    await recalculate_balance_from_date(db, current_user.id, income_date)
+    try:
+        from app.api.v1.balance_history import recalculate_balance_from_date
+        await recalculate_balance_from_date(db, current_user.id, income_date)
+    except Exception as e:
+        import logging
+        logging.error(f"Failed to recalculate balance history: {e}")
 
     return None
