@@ -265,7 +265,10 @@ async def get_income_expense_balance_chart(
     Get line chart data for income, expense and balance over time.
 
     If no dates are provided, defaults to the current month.
+    Uses balance_history table for accurate and efficient data retrieval.
     """
+    from app.models.balance_history import BalanceHistory
+
     today = date_type.today()
     if end_date is None:
         end_date = today
@@ -273,47 +276,65 @@ async def get_income_expense_balance_chart(
         # Default to first day of current month
         start_date = date_type(today.year, today.month, 1)
 
-    # Income per date
-    income_result = await db.execute(
-        select(Income.date, func.coalesce(func.sum(Income.amount), 0).label("amount"))
+    # Get balance history data for the date range
+    balance_history_result = await db.execute(
+        select(BalanceHistory)
         .where(
-            Income.user_id == current_user.id,
-            Income.date >= start_date,
-            Income.date <= end_date,
+            BalanceHistory.user_id == current_user.id,
+            BalanceHistory.date >= start_date,
+            BalanceHistory.date <= end_date,
         )
-        .group_by(Income.date)
+        .order_by(BalanceHistory.date.asc())
     )
-    income_rows = income_result.all()
-    income_by_date = {row.date: int(row.amount or 0) for row in income_rows}
-
-    # Expense per date
-    expense_result = await db.execute(
-        select(Expense.date, func.coalesce(func.sum(Expense.amount), 0).label("amount"))
-        .where(
-            Expense.user_id == current_user.id,
-            Expense.date >= start_date,
-            Expense.date <= end_date,
-        )
-        .group_by(Expense.date)
-    )
-    expense_rows = expense_result.all()
-    expense_by_date = {row.date: int(row.amount or 0) for row in expense_rows}
+    balance_history_rows = balance_history_result.scalars().all()
+    balance_by_date = {
+        row.date: {
+            "total_income": row.total_income,
+            "total_expense": row.total_expense,
+            "balance": row.balance,
+        }
+        for row in balance_history_rows
+    }
 
     # Build points for each date in range
+    # Use balance_history if available, otherwise use 0
     points: list[IncomeExpenseBalancePoint] = []
     current = start_date
     while current <= end_date:
-        income = income_by_date.get(current, 0)
-        expense = expense_by_date.get(current, 0)
-        balance = income - expense
-        points.append(
-            IncomeExpenseBalancePoint(
-                date=current,
-                income=income,
-                expense=expense,
-                balance=balance,
+        if current in balance_by_date:
+            # Use data from balance_history
+            data = balance_by_date[current]
+            points.append(
+                IncomeExpenseBalancePoint(
+                    date=current,
+                    income=int(data["total_income"]),
+                    expense=int(data["total_expense"]),
+                    balance=int(data["balance"]),
+                )
             )
-        )
+        else:
+            # No balance_history entry for this date, use 0
+            # Get previous balance if available
+            prev_balance_result = await db.execute(
+                select(BalanceHistory.balance)
+                .where(
+                    BalanceHistory.user_id == current_user.id,
+                    BalanceHistory.date < current,
+                )
+                .order_by(BalanceHistory.date.desc())
+                .limit(1)
+            )
+            prev_balance_row = prev_balance_result.scalar_one_or_none()
+            prev_balance = int(prev_balance_row) if prev_balance_row is not None else 0
+
+            points.append(
+                IncomeExpenseBalancePoint(
+                    date=current,
+                    income=0,
+                    expense=0,
+                    balance=prev_balance,
+                )
+            )
         current = current + timedelta(days=1)
 
     return IncomeExpenseBalanceChart(points=points)
