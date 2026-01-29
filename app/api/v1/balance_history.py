@@ -78,8 +78,37 @@ async def update_balance_history_for_date(db: AsyncSession, user_id, target_date
         )
         db.add(new_history)
 
-    await db.commit()
+    await db.flush()  # Flush instead of commit to allow transaction control
     return balance
+
+
+async def recalculate_balance_from_date(db: AsyncSession, user_id, from_date: date_type):
+    """
+    Recalculate balance history from a specific date onwards.
+    This is needed when an income/expense is created, updated, or deleted.
+    
+    IMPORTANT: We must recalculate ALL dates from from_date to today, not just
+    dates with transactions, because balance is cumulative. Changing a transaction
+    on day 5 affects the balance on days 5, 6, 7, 8... all the way to today.
+    """
+    today = date_type.today()
+    
+    from uuid import UUID
+    
+    if isinstance(user_id, str):
+        user_uuid = UUID(user_id)
+    else:
+        user_uuid = user_id
+    
+    # Recalculate balance for EVERY date from from_date to today (inclusive)
+    # This ensures cumulative balance is correct for all dates
+    current_date = from_date
+    while current_date <= today:
+        await update_balance_history_for_date(db, user_uuid, current_date)
+        current_date = current_date + timedelta(days=1)
+    
+    # Commit all balance history updates
+    await db.commit()
 
 
 @router.get("/", response_model=List[BalanceHistoryResponse])

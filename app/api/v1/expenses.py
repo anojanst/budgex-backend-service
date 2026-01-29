@@ -168,6 +168,11 @@ async def create_expense(
     await db.commit()
     await db.refresh(new_expense)
 
+    # Recalculate balance history from expense date onwards
+    from app.api.v1.balance_history import recalculate_balance_from_date
+
+    await recalculate_balance_from_date(db, current_user.id, expense_data.date)
+
     return new_expense
 
 
@@ -206,6 +211,10 @@ async def update_expense(
             if not tag_result.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
 
+    # Store old date before update
+    old_date = expense.date
+    dates_to_recalculate = {old_date}
+
     # Update fields
     if expense_data.name is not None:
         expense.name = expense_data.name
@@ -213,6 +222,7 @@ async def update_expense(
         expense.amount = expense_data.amount
     if expense_data.date is not None:
         expense.date = expense_data.date
+        dates_to_recalculate.add(expense_data.date)  # Add new date if changed
     if expense_data.budget_id is not None:
         expense.budget_id = expense_data.budget_id if expense_data.budget_id else None
     if expense_data.tag_id is not None:
@@ -220,6 +230,12 @@ async def update_expense(
 
     await db.commit()
     await db.refresh(expense)
+
+    # Recalculate balance history from the earliest affected date onwards
+    from app.api.v1.balance_history import recalculate_balance_from_date
+
+    earliest_date = min(dates_to_recalculate)
+    await recalculate_balance_from_date(db, current_user.id, earliest_date)
 
     return expense
 
@@ -239,8 +255,16 @@ async def delete_expense(
     if not expense:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Expense not found")
 
+    # Store date before deletion for recalculation
+    expense_date = expense.date
+
     await db.delete(expense)
     await db.commit()
+
+    # Recalculate balance history from expense date onwards
+    from app.api.v1.balance_history import recalculate_balance_from_date
+
+    await recalculate_balance_from_date(db, current_user.id, expense_date)
 
     return None
 

@@ -137,6 +137,11 @@ async def create_income(
     await db.commit()
     await db.refresh(new_income)
 
+    # Recalculate balance history from income date onwards
+    from app.api.v1.balance_history import recalculate_balance_from_date
+
+    await recalculate_balance_from_date(db, current_user.id, income_data.date)
+
     return new_income
 
 
@@ -163,6 +168,10 @@ async def update_income(
             if not tag_result.scalar_one_or_none():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tag not found")
 
+    # Store old date before update
+    old_date = income.date
+    dates_to_recalculate = {old_date}
+
     # Update fields
     if income_data.name is not None:
         income.name = income_data.name
@@ -172,11 +181,18 @@ async def update_income(
         income.category = income_data.category
     if income_data.date is not None:
         income.date = income_data.date
+        dates_to_recalculate.add(income_data.date)  # Add new date if changed
     if income_data.tag_id is not None:
         income.tag_id = income_data.tag_id if income_data.tag_id else None
 
     await db.commit()
     await db.refresh(income)
+
+    # Recalculate balance history from the earliest affected date onwards
+    from app.api.v1.balance_history import recalculate_balance_from_date
+
+    earliest_date = min(dates_to_recalculate)
+    await recalculate_balance_from_date(db, current_user.id, earliest_date)
 
     return income
 
@@ -196,7 +212,15 @@ async def delete_income(
     if not income:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Income not found")
 
+    # Store date before deletion for recalculation
+    income_date = income.date
+
     await db.delete(income)
     await db.commit()
+
+    # Recalculate balance history from income date onwards
+    from app.api.v1.balance_history import recalculate_balance_from_date
+
+    await recalculate_balance_from_date(db, current_user.id, income_date)
 
     return None
